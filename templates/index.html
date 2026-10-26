@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Research Agent</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.3rem; }
+  #log { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; min-height: 300px; max-height: 60vh; overflow-y: auto; }
+  .msg { margin: .6rem 0; white-space: pre-wrap; }
+  .user { font-weight: 600; }
+  .meta { color: #666; font-size: .8rem; }
+  form { display: flex; gap: .5rem; margin-top: .75rem; }
+  input[type=text] { flex: 1; padding: .6rem; border: 1px solid #bbb; border-radius: 6px; }
+  button { padding: .6rem 1rem; border: 0; border-radius: 6px; background: #1a1a1a; color: #fff; cursor: pointer; }
+  .upload { margin-top: 1rem; font-size: .9rem; }
+</style>
+</head>
+<body>
+<h1>AI Research Agent</h1>
+<div id="log"></div>
+<form id="chat-form">
+  <input type="text" id="message" placeholder="Ask a research question..." autocomplete="off" required>
+  <button type="submit">Send</button>
+</form>
+<div class="upload">
+  Add a document (PDF, TXT, MD): <input type="file" id="file"> <span id="upload-status" class="meta"></span>
+</div>
+<script>
+const sessionId = crypto.randomUUID();
+const log = document.getElementById('log');
+
+function add(cls, text, meta) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + cls;
+  div.textContent = text;
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = meta;
+    div.appendChild(m);
+  }
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+document.getElementById('chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('message');
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = '';
+  add('user', 'You: ' + message);
+  add('meta', 'Researching...');
+  const pending = log.lastChild;
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, message })
+    });
+    const data = await res.json();
+    pending.remove();
+    if (!res.ok) { add('meta', 'Error: ' + data.error); return; }
+    const tools = data.steps.map(s => s.tool).join(' → ');
+    const sources = data.sources.map(s => s.title || s.ref).join('; ');
+    add('agent', data.answer, [tools && 'Tools: ' + tools, sources && 'Sources: ' + sources].filter(Boolean).join('\n'));
+  } catch (err) {
+    pending.remove();
+    add('meta', 'Network error: ' + err.message);
+  }
+});
+
+document.getElementById('file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const status = document.getElementById('upload-status');
+  const form = new FormData();
+  form.append('file', file);
+  status.textContent = 'Uploading...';
+  const res = await fetch('/ingest', { method: 'POST', body: form });
+  const data = await res.json();
+  status.textContent = res.ok ? `Indexed ${data.source} (${data.chunks} chunks)` : data.error;
+  e.target.value = '';
+});
+</script>
+</body>
+</html>
